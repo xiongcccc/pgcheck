@@ -2,6 +2,10 @@
 
 pgcheck is a one-click tool to get the running status of PostgreSQL, including stream replication/lock/wait events/partition/index/relation,etc., which makes the operation and maintenance more efficient.
 
+### Note
+
+The current supported versions include 11, 12, 13, 14, and 15. Other versions may be a little incompatible, and some of them report errors, but most of them can also be used.
+
 ## Usage
 
 ~~~shell
@@ -33,9 +37,10 @@ Usage:
  ./pgcheck --help or -h                     : print this help information
 
  Author: xiongcc@PostgreSQL学徒, github: https://github.com/xiongcccc.
- If you have any feedback or suggestions, feel free to contace with me.
+ If you have any feedback or suggestions, feel free to contact with me.
  Email: xiongcc_1994@126.com/xiongcc_1994@outlool.com. Wechat: _xiongcc
 ~~~
 
+The default port used is 5432. If there are multiple instances on the server, you can specify environment variables before use, such as export PGPORT=5433。
 
-
+If you have any feedback or suggestions, feel free to contact with me.

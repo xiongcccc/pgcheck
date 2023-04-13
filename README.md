@@ -38,7 +38,7 @@ Usage:
 
  Author: xiongcc@PostgreSQL学徒, github: https://github.com/xiongcccc.
  If you have any feedback or suggestions, feel free to contact with me.
- Email: xiongcc_1994@126.com/xiongcc_1994@outlool.com. Wechat: _xiongcc
+ Email: xiongcc_1994@126.com/xiongcc_1994@outlook.com. Wechat: _xiongcc
 ~~~
 Currently supported features include：
 

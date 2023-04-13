@@ -4,7 +4,7 @@ pgcheck is a one-click tool to get the running status of PostgreSQL, including s
 
 ### Note
 
-The current supported versions include 11, 12, 13, 14, and 15. Other versions may be a little incompatible, and some of them report errors, but most of them can also be used.
+The current supported versions include 11, 12, 13, 14, and 15. Other versions may be a little incompatible, and some of them report errors, but most of them can also be used. Currently supported platform is x86.
 
 ## Usage
 

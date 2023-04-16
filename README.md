@@ -52,18 +52,20 @@ Currently supported features include：
 - View the overall status information of the database, which will be different in different versions (please specify the exact version of the psql environment variable, because the system views of different versions will be different, and the judgment is made in the code, otherwise an error may be reported)
 - View index bloat ratio/redundant index/inefficient index/index overall information
 - View index information
+- View lock state and lock queue 
 - View checkpoint and background writer process status
-- View age
+- View age and transaction id consuming detail at database level
 - View streaming replication status
 - View the number of connections and queries currently being allowed
 - View long transactions
 - View table bloat, table bloat depends on statistical information, so in order to be more accurate, it is best to do an analysis before doing it, this query will take a little time
+- View tables that need to execute vacuum and retrieves the oldest value for each of the vacuum operation blockers 
 - Check the index creation progress, only supported in versions after 12, and the previous version will prompt that the view does not exist and exit
 - View WAL archive status
 - View WAL generation speed
-- View waiting time
+- View wait event 
 - View partition table information, including native partitions and inherited partitions
-- View objects owned by a user, and membership
+- View objects owned by a user, and member relationship
 
 The default port used is 5432. If there are multiple instances on the server, you can specify environment variables before use, such as export PGPORT=5433。
 

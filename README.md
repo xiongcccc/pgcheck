@@ -1,3 +1,7 @@
+## Star History
+
+[![Stargazers over time](https://starchart.cc/xiongcccc/pgcheck.svg)](https://starchart.cc/xiongcccc/pgcheck)
+
 ## Introduce
 
 pgcheck is a one-click tool to get the running status of PostgreSQL, including stream replication/lock/wait events/partition/index/relation,etc., which makes the operation and maintenance more efficient.

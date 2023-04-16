@@ -1,6 +1,6 @@
 ## Star History
 
-[![Stargazers over time](https://starchart.cc/xiongcccc/pgcheck.svg)](https://starchart.cc/xiongcccc/pgcheck)
+[![Star History Chart](https://api.star-history.com/svg?repos=xiongcccc/pgcheck&type=Date)](https://star-history.com/#xiongcccc/pgcheck&Date)
 
 ## Introduce
 

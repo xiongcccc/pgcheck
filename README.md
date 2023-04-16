@@ -28,6 +28,7 @@ Usage:
  ./pgcheck long_transaction database  : long transaction detail
  ./pgcheck relation_bloat database    : relation bloat information (estimated value)
  ./pgcheck vacuum_state database      : current vacuum progress information
+ ./pgcheck vacuum_need database       : show tables that need vacuum
  ./pgcheck index_create database      : index create progress information
  ./pgcheck wal_archive                : wal archive progress information
  ./pgcheck wal_generate wal_path      : wal generate speed (you should provide extra wal directory)

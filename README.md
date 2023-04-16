@@ -13,7 +13,7 @@ The current supported versions include 11, 12, 13, 14, and 15. Other versions ma
 ## Usage
 
 ~~~shell
-Description: The script is used to collect specified information
+Description: The utility is used to collect specified information
 Current Version: 1.0.2
 Usage:
  ./pgcheck relation database schema   : list information about tables and indexes in the specified schema

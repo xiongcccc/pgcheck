@@ -14,9 +14,10 @@ The current supported versions include 11, 12, 13, 14, and 15. Other versions ma
 
 ~~~shell
 Description: The utility is used to collect specified information
-Current Version: 1.0.2
+Current Version: 1.0.4
 Usage:
  ./pgcheck relation database schema   : list information about tables and indexes in the specified schema
+ ./pgcheck relconstraint database relname   : list all constraint corresponding to the specified table
  ./pgcheck alltoast database schema   : list all toasts and their corresponding tables
  ./pgcheck reltoast database relname  : list the toast information of the specified table
  ./pgcheck dbstatus                   : list all database status and statistics

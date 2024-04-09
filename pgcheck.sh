@@ -1386,7 +1386,6 @@ FROM pg_catalog.pg_statio_user_tables psu
    JOIN pg_class pc ON psu.relname = pc.relname
    JOIN pg_database pd ON pc.relowner = pd.datdba
    JOIN pg_inherits pi ON pi.inhrelid = pc.oid
-WHERE pd.datname = 'postgres'
 GROUP BY pi.inhparent
 ORDER BY sum(pg_total_relation_size(psu.relid)) DESC;"
 

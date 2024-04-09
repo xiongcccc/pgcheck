@@ -6,6 +6,8 @@
 
 pgcheck is a one-click tool to get the running status of PostgreSQL, including stream replication/lock/wait events/partition/index/relation,etc., which makes the operation and maintenance more efficient.
 
+The script currently being refactored with golang, so stay tuned!
+
 ### Note
 
 The current supported versions include 11, 12, 13, 14, and 15. Other versions may be a little incompatible, and some of them report errors, but most of them can also be used. Currently supported platform is x86.

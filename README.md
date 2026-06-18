@@ -1,8 +1,37 @@
+<div align="center">
+
 # pgcheck
 
-English | [中文](#中文)
+**A lightweight PostgreSQL health-check CLI for DBAs, SREs, and database engineers.**
 
-`pgcheck` is a lightweight PostgreSQL health-check CLI for DBAs, SREs, and database engineers. It collects operational signals from PostgreSQL system catalogs and statistics views, including locks, wait events, replication, replication slots, xmin horizon, vacuum, transaction ID age, relation bloat, index health, temporary files, WAL archiving, partitions, TOAST tables, and object ownership.
+[English](#pgcheck) | [中文](#中文)
+
+<p>
+  <a href="https://github.com/xiongcccc/pgcheck/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/xiongcccc/pgcheck?style=flat&logo=github&label=stars&color=0366d6"></a>
+  <a href="https://github.com/xiongcccc/pgcheck/issues"><img alt="issues" src="https://img.shields.io/github/issues/xiongcccc/pgcheck?style=flat&logo=github&label=issues&color=f1c40f"></a>
+  <a href="https://github.com/xiongcccc/pgcheck/commits/master"><img alt="last commit" src="https://img.shields.io/github/last-commit/xiongcccc/pgcheck?style=flat&logo=github&label=last%20commit&color=6cc644"></a>
+  <a href="https://github.com/xiongcccc/pgcheck/blob/master/LICENSE"><img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
+</p>
+
+<p>
+  <img alt="version" src="https://img.shields.io/badge/version-2.0.1-2ea44f">
+  <img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-11--18-336791?logo=postgresql&logoColor=white">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.23%2B-00ADD8?logo=go&logoColor=white">
+  <img alt="psql" src="https://img.shields.io/badge/psql-supported-555555">
+</p>
+
+<p>
+  <img alt="built by" src="https://img.shields.io/badge/built%20by-xiongcccc-ff6a3d">
+  <a href="https://postgres-howto.cn/#/README"><img alt="postgres-howto" src="https://img.shields.io/badge/postgres--howto-integrated-5b5ff0"></a>
+  <img alt="pg_stat_io" src="https://img.shields.io/badge/pg__stat__io-PG16%2B-8a63d2">
+</p>
+
+</div>
+
+`pgcheck` collects operational signals from PostgreSQL system catalogs and statistics views, including locks, wait events, replication, replication slots, xmin horizon, vacuum, transaction ID age, relation bloat, index health, temporary files, WAL archiving, partitions, TOAST tables, and object ownership.
+
+> [!IMPORTANT]
+> `pgcheck` runs read-only inspection SQL, but some checks need monitoring privileges such as `pg_monitor`, `pg_read_all_stats`, or execute privilege on PostgreSQL monitoring functions. Run `pgcheck privilege` first when using a restricted monitoring role.
 
 The project started as a Bash-based one-click inspection script. It is now being refactored into a structured Go project with embedded SQL assets, explicit command registration, server-version detection, and a cleaner compatibility model.
 

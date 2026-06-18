@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/pgcheck-logo.png" alt="pgcheck logo" width="720">
+
 # pgcheck
 
 **A lightweight PostgreSQL health-check CLI for DBAs, SREs, and database engineers.**

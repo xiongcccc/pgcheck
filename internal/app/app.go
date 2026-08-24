@@ -74,9 +74,6 @@ func (a *App) Run(args []string) error {
 		fmt.Println(a.build.String())
 		return nil
 	}
-	if err := a.runner.Check(ctx); err != nil {
-		return err
-	}
 
 	cmd, ok := commandMap()[strings.ToLower(rest[0])]
 	if !ok {
@@ -114,6 +111,10 @@ func (a *App) Run(args []string) error {
 	if inv.Explain && !inv.ShowSQL {
 		fmt.Println(commandExplain(cmd))
 		return nil
+	}
+
+	if err := a.runner.Check(ctx); err != nil {
+		return err
 	}
 
 	versionDB := inv.DB

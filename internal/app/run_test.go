@@ -1,8 +1,11 @@
 package app
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestDatabaseStatusSQLVersionColumns(t *testing.T) {
@@ -25,6 +28,81 @@ func TestDatabaseStatusSQLVersionColumns(t *testing.T) {
 	pg14 := databaseStatusSQL(14)
 	if !strings.Contains(pg14, "checksum_failures") || !strings.Contains(pg14, "session_time") {
 		t.Fatalf("PostgreSQL 14 query should include checksum and session statistics")
+	}
+	if !strings.Contains(pg14, "round(100::numeric * blks_hit::numeric") {
+		t.Fatalf("database status query should avoid integer division for cache hit ratio")
+	}
+	if !strings.Contains(pg14, "round(100::numeric * xact_commit::numeric") {
+		t.Fatalf("database status query should avoid integer division for commit ratio")
+	}
+}
+
+func TestExplainDoesNotRequireBackendCheck(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pgcheck.json")
+	data := []byte(`{
+  "connection": {
+    "host": "203.0.113.1",
+    "port": "1",
+    "user": "postgres",
+    "database": "postgres",
+    "connect_timeout": "1"
+  },
+  "psql": {
+    "path": "pgcheck-psql-does-not-exist"
+  }
+}`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := New(fstest.MapFS{}, BuildInfo{Version: "test"})
+	if err := app.Run([]string{"--config", path, "quick", "postgres", "--explain"}); err != nil {
+		t.Fatalf("pure explain should not check psql or connect to PostgreSQL: %v", err)
+	}
+}
+
+func TestQuickCommandRegistered(t *testing.T) {
+	cmd, ok := commandMap()["quick"]
+	if !ok {
+		t.Fatalf("quick command is missing")
+	}
+	if !cmd.Database {
+		t.Fatalf("quick should require a database name")
+	}
+	if cmd.Run == nil {
+		t.Fatalf("quick should have a runner")
+	}
+	if !strings.Contains(commandExplain(cmd), "best-effort") {
+		t.Fatalf("quick explain should describe best-effort behavior")
+	}
+}
+
+func TestSQLAssetsUseSaferRelations(t *testing.T) {
+	vacuumNeed, err := os.ReadFile("../../SQL/vacuum_need.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vacuumNeedSQL := string(vacuumNeed)
+	if !strings.Contains(vacuumNeedSQL, "pg_stat_user_tables.relid = pg_class.oid") {
+		t.Fatalf("vacuum_needed should join pg_class by oid/relid")
+	}
+
+	unusedIndexes, err := os.ReadFile("../../SQL/find_unused_indexes.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unusedIndexesSQL := string(unusedIndexes)
+	for _, expected := range []string{
+		"NOT pg_index.indisprimary",
+		"AND NOT pg_index.indisunique",
+		"AND NOT pg_index.indisexclusion",
+		"c.conindid = idx_stat.indexrelid",
+		"pg_relation_size(idx_stat.indexrelid) >= 32768",
+	} {
+		if !strings.Contains(unusedIndexesSQL, expected) {
+			t.Fatalf("unused index SQL missing %q", expected)
+		}
 	}
 }
 

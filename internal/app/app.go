@@ -111,6 +111,11 @@ func (a *App) Run(args []string) error {
 	}
 	inv.Args = rest
 
+	if inv.Explain && !inv.ShowSQL {
+		fmt.Println(commandExplain(cmd))
+		return nil
+	}
+
 	versionDB := inv.DB
 	if versionDB == "" {
 		versionDB = cfg.Connection.Database
@@ -128,9 +133,6 @@ func (a *App) Run(args []string) error {
 	}
 	if inv.Explain {
 		fmt.Println(commandExplain(cmd))
-		if !inv.ShowSQL {
-			return nil
-		}
 	}
 	if err := cmd.Run(ctx, a, inv); err != nil {
 		return decoratePermissionError(cmd.Name, err)
@@ -159,6 +161,7 @@ func (a *App) printHelp() {
 	fmt.Println("Config example:")
 	fmt.Println("  cp pgcheck.example.json pgcheck.json")
 	fmt.Println("  pgcheck --config pgcheck.json dbstatus")
+	fmt.Println("  pgcheck quick postgres")
 	fmt.Println("  pgcheck -c pgcheck.json connections postgres")
 	fmt.Println("  pgcheck -x lock postgres")
 	fmt.Println("  pgcheck -At dbstatus")
@@ -199,6 +202,13 @@ func commands() []command {
 		{
 			Name: "dbstatus", Usage: "pgcheck dbstatus", Summary: "Show database-level statistics", Run: runDBStatus,
 		},
+		withExplain(command{
+			Name:     "quick",
+			Usage:    "pgcheck quick <database>",
+			Summary:  "Run a small best-effort DBA quick check",
+			Database: true,
+			Run:      runQuick,
+		}, "This check runs a small, read-only, best-effort set of common DBA checks: database status, lock tree, long transactions, xmin blockers, replication slots, WAL health, vacuum queue, and active temporary files. Individual permission errors are reported as warnings so one blocked check does not hide the rest."),
 		sqlCommand("freeze", "pgcheck freeze <database>", "Show transaction ID consumption and freeze risk", true, nil, 0, true, []queryStep{{File: "age_consume.sql", Notes: freezeNotes}, {File: "age_consume_dblvl.sql", Header: "Database-level transaction ID usage:"}, {File: "age_consume_rel_lvl.sql", Header: "Top relations by frozen xid age:"}}),
 		sqlCommand("index_bloat", "pgcheck index_bloat <database>", "Estimate btree index bloat", true, nil, 0, false, []queryStep{{File: "index_bloat.sql", Header: "This query may take a while.", Notes: indexBloatNotes}}),
 		sqlCommand("index_create", "pgcheck index_create <database>", "Show CREATE INDEX progress", true, nil, 12, true, []queryStep{{File: "index_create.sql", Repeat: 5, RepeatDelay: time.Second, EmptyMessage: "no running create index process", Notes: indexCreateNotes}}),

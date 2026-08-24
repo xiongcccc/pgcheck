@@ -1,7 +1,8 @@
 SELECT
+    pg_stat_user_tables.schemaname,
     pg_stat_user_tables.relname,
     pg_stat_user_tables.n_dead_tup,
-    50 + 0.1 * pg_class.reltuples as vacuum_threshold,
+    50 + 0.1 * greatest(pg_class.reltuples, 0) as vacuum_threshold,
     pg_stat_user_tables.n_live_tup,
     pg_stat_user_tables.n_tup_del,
     pg_stat_user_tables.n_tup_upd,
@@ -10,8 +11,10 @@ SELECT
     pg_stat_user_tables.last_autovacuum,
     now() as now,
     pg_class.reltuples,
-    pg_stat_user_tables.n_dead_tup > (50 + 0.1 * pg_class.reltuples) as is_vacuum
- FROM
-    pg_stat_user_tables INNER JOIN pg_class ON pg_stat_user_tables.relname = pg_class.relname
- ORDER BY
-    pg_stat_user_tables.n_dead_tup > (50 + 0.1 * pg_class.reltuples) DESC;
+    pg_stat_user_tables.n_dead_tup > (50 + 0.1 * greatest(pg_class.reltuples, 0)) as is_vacuum
+FROM
+    pg_stat_user_tables
+    JOIN pg_class ON pg_stat_user_tables.relid = pg_class.oid
+ORDER BY
+    pg_stat_user_tables.n_dead_tup > (50 + 0.1 * greatest(pg_class.reltuples, 0)) DESC,
+    pg_stat_user_tables.n_dead_tup DESC;

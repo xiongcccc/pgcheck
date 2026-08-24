@@ -1,8 +1,8 @@
 SELECT
     datname AS database_name,
     pg_size_pretty(pg_database_size(datname)) AS database_size,
-    100 * blks_hit / (blks_hit + blks_read) || ' %' AS cache_hit_ratio,
-    100 * xact_commit / (xact_commit + xact_rollback) || ' %' AS commit_ratio,
+    round(100::numeric * blks_hit::numeric / NULLIF(blks_hit + blks_read, 0), 2) || ' %' AS cache_hit_ratio,
+    round(100::numeric * xact_commit::numeric / NULLIF(xact_commit + xact_rollback, 0), 2) || ' %' AS commit_ratio,
     conflicts,
     temp_files,
     pg_size_pretty(temp_bytes) AS temp_bytes,

@@ -4,7 +4,7 @@
 
 # pgcheck
 
-**A lightweight PostgreSQL health-check CLI for DBAs, SREs, and database engineers.**
+**A ready-to-run PostgreSQL DBA helper for quick checks and focused troubleshooting.**
 
 [English](#pgcheck) | [中文](#中文)
 
@@ -30,21 +30,22 @@
 
 </div>
 
-`pgcheck` collects operational signals from PostgreSQL system catalogs and statistics views, including locks, wait events, replication, replication slots, xmin horizon, vacuum, transaction ID age, relation bloat, index health, temporary files, WAL archiving, partitions, TOAST tables, and object ownership.
+`pgcheck` is a lightweight DBA helper for quickly answering practical PostgreSQL questions: is the database blocked, are there long transactions, is vacuum falling behind, are replication slots retaining WAL, are temporary files growing, and which check should I run next?
+
+It is intentionally not a monitoring platform. It runs read-only inspection SQL on demand, keeps output close to `psql`, and keeps each SQL visible through `--show-sql` or `--explain` when you want to verify the logic.
 
 > [!IMPORTANT]
 > `pgcheck` runs read-only inspection SQL, but some checks need monitoring privileges such as `pg_monitor`, `pg_read_all_stats`, or execute privilege on PostgreSQL monitoring functions. Run `pgcheck privilege` first when using a restricted monitoring role.
 
-The project started as a Bash-based one-click inspection script. It is now being refactored into a structured Go project with embedded SQL assets, explicit command registration, server-version detection, and a cleaner compatibility model.
+The project started as a Bash-based one-click inspection script. It is now a compact Go CLI with embedded SQL assets, explicit command registration, server-version detection, and a cleaner compatibility model.
 
 ## Highlights
 
-- Simple single-binary CLI written in Go.
-- Uses PostgreSQL's standard `psql` connection behavior and environment variables.
-- Embeds SQL checks into the binary with Go `embed`.
-- Detects PostgreSQL server version instead of relying on client version.
-- Keeps each check as a registered command, making the project easier to extend and test.
-- Preserves the original SQL assets under `SQL/` for review and reuse.
+- Start with `pgcheck quick <database>` for a small best-effort overview.
+- Use focused commands such as `lock_tree`, `xmin_blockers`, `vacuum_queue`, `wal_health`, and `temp_files` when you need to drill down.
+- Uses PostgreSQL's standard `psql` behavior when available, including `.pgpass`, service files, SSL options, and familiar output flags.
+- Detects PostgreSQL server version and chooses version-aware SQL for checks that need it.
+- Keeps SQL as plain files under `SQL/` so DBAs can review, reuse, and improve the checks.
 
 ## Compatibility
 
@@ -65,6 +66,7 @@ Use a config file when you do not want to export environment variables:
 ```bash
 cp pgcheck.example.json pgcheck.json
 bin/pgcheck --config pgcheck.json dbstatus
+bin/pgcheck quick postgres
 bin/pgcheck -c pgcheck.json connections postgres
 ```
 
@@ -164,6 +166,7 @@ pgcheck alltoast <database> <schema>         List TOAST tables in a schema
 pgcheck reltoast <database> <relation>       Show TOAST-related columns for a relation
 pgcheck analyze_needed <database>            Show tables that need ANALYZE
 pgcheck dbstatus                             Show database-level statistics
+pgcheck quick <database>                     Run a small best-effort DBA quick check
 pgcheck index_bloat <database>               Estimate btree index bloat
 pgcheck index_duplicate <database>           Find duplicate indexes
 pgcheck index_efficiency <database>          Find low-efficiency indexes
@@ -202,6 +205,7 @@ pgcheck xmin_blockers                        Show global xmin horizon blockers
 
 ```bash
 bin/pgcheck dbstatus
+bin/pgcheck quick postgres
 bin/pgcheck -x lock postgres
 bin/pgcheck -At dbstatus
 bin/pgcheck --config pgcheck.json dbstatus
@@ -268,13 +272,13 @@ Build:
 go build -o bin/pgcheck .
 ```
 
-## Roadmap
+## Direction
 
-- Add automated PostgreSQL 11-18 compatibility tests with containers.
-- Add structured output formats such as JSON and Markdown.
-- Add severity classification for health-check results.
-- Add native Go database driver execution mode.
-- Add release artifacts for Linux/macOS on amd64 and arm64.
+The project will stay small. Future work should improve correctness, compatibility, packaging, and the quality of a few high-value DBA checks rather than turning `pgcheck` into a heavy observability platform.
+
+- Add automated PostgreSQL 11-18 compatibility smoke tests with containers.
+- Keep refining high-signal SQL checks and permission-friendly fallback messages.
+- Publish simple Linux/macOS release artifacts for amd64 and arm64.
 
 ## License
 
@@ -282,18 +286,19 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## 中文
 
-`pgcheck` 是一款轻量级 PostgreSQL 巡检 CLI，面向 DBA、SRE 和数据库工程师。它通过 PostgreSQL 系统表、系统视图和统计视图采集运行状态，覆盖锁等待、等待事件、复制、复制槽、xmin horizon、VACUUM、事务 ID 年龄、表膨胀、索引健康、临时文件、WAL 归档、分区表、TOAST 表和对象归属等常见运维场景。
+`pgcheck` 是一款轻量级 PostgreSQL DBA 小助手，目标是快速回答一线排障中最常见的问题：数据库是不是被锁住了，是否存在长事务，VACUUM 是否落后，复制槽是否保留了太多 WAL，临时文件是否异常增长，以及下一步应该看哪个检查项。
 
-这个项目最早是一个 Bash 编写的一键巡检脚本。当前版本正在重构为结构化的 Go 项目：SQL 资源会被嵌入二进制，命令通过注册表管理，版本判断基于 PostgreSQL 服务端版本，并提供更清晰的兼容策略。
+它不是一个监控平台，也不追求把所有能力都塞进来。`pgcheck` 按需执行只读巡检 SQL，输出尽量贴近 `psql`，并通过 `--show-sql` 和 `--explain` 让 DBA 可以随时确认检查逻辑。
+
+这个项目最早是一个 Bash 编写的一键巡检脚本。当前版本已经重构为更紧凑的 Go CLI：SQL 资源会被嵌入二进制，命令通过注册表管理，版本判断基于 PostgreSQL 服务端版本，并提供更清晰的兼容策略。
 
 ## 亮点
 
-- 使用 Go 编写，构建后是一个简单的单文件 CLI。
-- 复用 PostgreSQL 标准 `psql` 连接行为和环境变量。
-- 使用 Go `embed` 将 SQL 巡检资源嵌入二进制。
-- 检测 PostgreSQL 服务端版本，而不是依赖本地客户端版本。
-- 每个巡检项都是独立注册的命令，后续扩展和测试更容易。
-- 保留原始 `SQL/` 目录，方便审阅、复用和继续沉淀 SQL 资产。
+- 从 `pgcheck quick <database>` 开始，快速得到一组高频 DBA 检查结果。
+- 遇到具体问题后，再使用 `lock_tree`、`xmin_blockers`、`vacuum_queue`、`wal_health`、`temp_files` 等命令下钻。
+- 可用时复用 PostgreSQL 标准 `psql` 行为，包括 `.pgpass`、service file、SSL 参数和常见输出选项。
+- 检测 PostgreSQL 服务端版本，并为需要兼容的检查选择对应 SQL。
+- SQL 仍然以普通文件形式保留在 `SQL/` 目录，方便 DBA 审阅、复用和继续沉淀。
 
 ## 兼容性
 
@@ -314,6 +319,7 @@ PostgreSQL 17+ 对部分统计视图做了调整，例如 checkpoint 和 VACUUM 
 ```bash
 cp pgcheck.example.json pgcheck.json
 bin/pgcheck --config pgcheck.json dbstatus
+bin/pgcheck quick postgres
 bin/pgcheck -c pgcheck.json connections postgres
 ```
 
@@ -413,6 +419,7 @@ pgcheck alltoast <database> <schema>         查看指定 schema 下的 TOAST �
 pgcheck reltoast <database> <relation>       查看指定表的 TOAST 相关列和 TOAST 表信息
 pgcheck analyze_needed <database>            查看需要 ANALYZE 的表
 pgcheck dbstatus                             查看数据库整体状态
+pgcheck quick <database>                     执行一组轻量的 DBA 快速检查
 pgcheck index_bloat <database>               估算 btree 索引膨胀
 pgcheck index_duplicate <database>           查找重复索引
 pgcheck index_efficiency <database>          查找低效索引
@@ -451,6 +458,7 @@ pgcheck xmin_blockers                        查看全局 xmin horizon 阻塞来
 
 ```bash
 bin/pgcheck dbstatus
+bin/pgcheck quick postgres
 bin/pgcheck -x lock postgres
 bin/pgcheck -At dbstatus
 bin/pgcheck --config pgcheck.json dbstatus
@@ -517,13 +525,13 @@ gofmt -w main.go internal/**/*.go
 go build -o bin/pgcheck .
 ```
 
-## 后续计划
+## 后续方向
 
-- 使用容器补齐 PostgreSQL 11-18 的自动化兼容测试。
-- 增加 JSON、Markdown 等结构化输出格式。
-- 为巡检结果增加风险等级和诊断建议。
-- 增加原生 Go database driver 执行模式。
-- 发布 Linux/macOS amd64/arm64 构建产物。
+项目会继续保持轻量。后续更应该投入在正确性、兼容性、打包发布和少数高价值 DBA 检查项的质量上，而不是把 `pgcheck` 做成一个很重的观测平台。
+
+- 使用容器补齐 PostgreSQL 11-18 的自动化兼容冒烟测试。
+- 持续优化高信号 SQL 检查和权限不足时的降级提示。
+- 发布简单可用的 Linux/macOS amd64/arm64 构建产物。
 
 ## License
 

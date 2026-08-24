@@ -27,6 +27,13 @@ type queryStep struct {
 	EmptyMessage   string
 }
 
+type quickStep struct {
+	title    string
+	step     queryStep
+	query    func() (string, error)
+	expanded bool
+}
+
 func sqlCommand(name, usage, summary string, database bool, extra []argSpec, minVersion int, expanded bool, steps []queryStep) command {
 	return command{
 		Name:       name,
@@ -192,6 +199,82 @@ func runCheckpoint(ctx context.Context, a *App, inv invocation) error {
 	return nil
 }
 
+func runQuick(ctx context.Context, a *App, inv invocation) error {
+	steps := []quickStep{
+		{
+			title:    "database status",
+			query:    func() (string, error) { return databaseStatusSQL(inv.Version.Major), nil },
+			expanded: true,
+		},
+		{
+			title: "lock tree",
+			step:  queryStep{File: "lock_tree.sql"},
+		},
+		{
+			title: "long transactions",
+			step:  queryStep{File: "long_transaction.sql"},
+		},
+		{
+			title:    "xmin blockers",
+			step:     queryStep{File: "xmin_horizon.sql"},
+			expanded: true,
+		},
+		{
+			title: "replication slots",
+			query: func() (string, error) {
+				file := "replication_slots_10.sql"
+				if inv.Version.Major >= 15 {
+					file = "replication_slots.sql"
+				}
+				return a.q.Read(file)
+			},
+		},
+		{
+			title: "WAL health",
+			step:  queryStep{File: "wal_health.sql"},
+		},
+		{
+			title: "vacuum queue",
+			step:  queryStep{File: "vacuum_queue.sql"},
+		},
+		{
+			title: "active temporary files",
+			step:  queryStep{File: "temp_files.sql"},
+		},
+	}
+
+	hadWarning := false
+	for _, item := range steps {
+		fmt.Printf("\n== %s ==\n", item.title)
+		query, err := item.querySQL(a)
+		if err != nil {
+			hadWarning = true
+			fmt.Printf("warning: %v\n", err)
+			continue
+		}
+		if inv.ShowSQL {
+			printSQLTrace([]string{query})
+			continue
+		}
+		opts := pgexec.Options{Database: inv.DB, Expanded: a.displayExpanded(item.expanded)}
+		if err := a.runner.Exec(ctx, opts, query); err != nil {
+			hadWarning = true
+			fmt.Printf("warning: %v\n", decoratePermissionError("quick/"+item.title, err))
+		}
+	}
+	if hadWarning {
+		fmt.Println("\nquick completed with warnings; run `pgcheck privilege` if a check was skipped by permissions.")
+	}
+	return nil
+}
+
+func (q quickStep) querySQL(a *App) (string, error) {
+	if q.query != nil {
+		return q.query()
+	}
+	return a.stepSQL(q.step)
+}
+
 func runVacuumState(ctx context.Context, a *App, inv invocation) error {
 	file := "vacuum_state.sql"
 	if inv.Version.Major >= 17 {
@@ -223,8 +306,8 @@ func databaseStatusSQL(major int) string {
 	base := []string{
 		"datname AS database_name",
 		"pg_size_pretty(pg_database_size(datname)) AS database_size",
-		"100 * blks_hit / NULLIF(blks_hit + blks_read, 0) || ' %' AS cache_hit_ratio",
-		"100 * xact_commit / NULLIF(xact_commit + xact_rollback, 0) || ' %' AS commit_ratio",
+		"round(100::numeric * blks_hit::numeric / NULLIF(blks_hit + blks_read, 0), 2) || ' %' AS cache_hit_ratio",
+		"round(100::numeric * xact_commit::numeric / NULLIF(xact_commit + xact_rollback, 0), 2) || ' %' AS commit_ratio",
 		"conflicts",
 		"temp_files",
 		"pg_size_pretty(temp_bytes) AS temp_bytes",

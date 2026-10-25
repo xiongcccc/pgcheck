@@ -3,6 +3,17 @@
 Run unit tests with `go test ./...`. Database tests are skipped unless explicitly
 enabled by the integration runner. No test requires a public or production database.
 
+The [verification record](VERIFICATION.md) lists the locally tested engine versions,
+results, and limits. A successful plain `go test ./...` run without test database
+variables is not evidence that database compatibility tests ran.
+
+```bash
+go test -race -count=1 ./...
+go vet ./...
+```
+
+For SQL and CLI integration tests:
+
 ```bash
 bash scripts/test-postgres.sh /path/to/postgresql/bin [...additional bin directories]
 ```
@@ -31,6 +42,8 @@ roles/objects, and exercise extension install/update states in these disposable 
   argument validation, and internal metadata under CSV/expanded psql settings.
 - Regression execution of database status, privilege, wraparound, xmin, replication
   slots, connections, locks, waits and ANALYZE checks on every tested engine.
+- Every visible command's usage and hotspot metric descriptions in both README
+  languages, with pinned SQL attribution and third-party notice coverage.
 
 Fixtures with controlled statistics test arithmetic deterministically; real workload
 tests additionally validate catalog integration. Top-N output is not a guarantee of
@@ -45,7 +58,24 @@ verification infrastructure, not evidence that a particular remote run has passe
 
 ## 中文
 
-测试使用独立临时实例，覆盖 SQL 数值、权限、旧扩展、版本分支、错误提示、
-psql/原生后端及展示参数。所有重置统计、角色和扩展操作仅限测试实例。
-可控统计夹具用于确定性计算断言，真实负载用于核对系统目录及扩展集成。
-CI 配置提供 PG11-18 的持续测试；实际通过版本以对应执行记录为准。
+实际通过版本、结果和边界见[验证记录](VERIFICATION.md)。没有指定测试数据库时，
+普通 `go test ./...` 会跳过数据库测试，不能据此声称已通过兼容性验证。
+
+```bash
+go test -race -count=1 ./...
+go vet ./...
+bash scripts/test-postgres.sh /path/to/postgresql-16/bin /path/to/postgresql-18/bin
+```
+
+数据库测试需要包含 `pg_stat_statements` 的 PostgreSQL 安装，并以非 root 用户运行。
+脚本在 `/private/tmp` 创建 UTF-8 临时实例，仅允许 Unix socket 连接，
+使用 `pgcheck_test` 角色和 `pgcheck-integration` 标记，并在退出时停止、清理实例。
+测试会校验这些标记，所有重置统计、角色及扩展操作仅限测试实例。
+
+测试覆盖 SQL 数值、权限、旧扩展、版本分支、错误提示、psql/原生后端及展示参数；
+可控统计夹具用于确定性断言，真实负载用于核对系统目录及扩展集成。
+同时检查全部可见命令用法及热点指标说明是否在中英 README 中齐全，以及上游来源声明。
+小型夹具的执行时间不代表生产规模性能，Top-N 也不代表查询只扫描十条统计记录。
+
+CI 使用官方 PG11-18 容器，分别测试预加载和未预加载状态。
+CI 配置不等于远端执行已成功，实际结果仍以相应运行记录为准。

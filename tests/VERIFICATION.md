@@ -1,7 +1,7 @@
 # Hotspot Checks Verification
 
-Date: 2026-10-25. Applies to the working-tree change introducing `query_hotspot`,
-`query_temp`, and `table_hotspot`, together with the related correctness fixes.
+Date: 2026-10-25. Covers `query_hotspot`, `query_temp`, and `table_hotspot`,
+introduced in commit `f236bc3`, together with the related correctness fixes.
 This is a development verification record, not a release or deployment record.
 
 ## Executed Checks
@@ -60,13 +60,26 @@ See [README.md](README.md) for reproduction and the test safety guards. Controll
 statistics fixtures assert exact results using PostgreSQL's SQL evaluator;
 separate real workloads validate catalog and extension integration.
 
+## Documentation Follow-Up
+
+The README/help synchronization after `f236bc3` was verified on 2026-10-25:
+
+- Repeated the full local eight-version database matrix above successfully.
+- Repeated race unit tests, static checks, build, and help smoke checks.
+- Repeated Linux amd64/arm64 cross-compilation; this remains build-only evidence.
+- Expanded consistency assertions to all visible command usages and 15 hotspot
+  field names in both README languages, in addition to existing source credits.
+
+Only documentation, help text, and documentation checks changed in this follow-up;
+inspection SQL and execution logic were not modified.
+
 ## Limits
 
 - One representative minor version per major was exercised, not every minor.
 - No production-sized catalog/load benchmark, standby, managed-service variant,
   or full test of every existing command was performed.
-- Linux binaries were cross-compiled, not executed locally. The new official
-  PostgreSQL Docker CI matrix has not yet been run on the remote CI service.
+- Linux binaries were cross-compiled, not executed locally. Remote Docker CI
+  results are not included in this local record; consult the actual workflow run.
 - Unit race checks ran locally; the local database matrix ran without the race
   flag. The remote workflow includes it for database tests as well.
 - Cumulative counters are not instantaneous rates, device IOPS, or guaranteed
@@ -82,4 +95,5 @@ separate real workloads validate catalog and extension integration.
 同时通过竞态单测、静态检查和 Linux 双架构交叉编译。
 
 该记录不意味着所有小版本、全部历史命令、托管数据库、备库及生产规模均已验证。
-远端 CI 尚未执行，Linux 运行时仍需由 CI 或实际部署环境确认；本轮未发布上线。
+本记录不包含远端 CI 结果，需查看实际运行记录；Linux 运行时仍需由 CI 或实际部署
+环境确认，本轮未发布上线。

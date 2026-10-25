@@ -56,10 +56,26 @@ func TestHotspotDocumentationAndAttribution(t *testing.T) {
 	if len(sections) != 2 {
 		t.Fatal("expected English and Chinese README sections")
 	}
-	for _, name := range []string{"query_hotspot", "query_temp", "table_hotspot"} {
+	for _, cmd := range commands() {
+		if cmd.Hidden {
+			continue
+		}
 		for i, section := range sections {
-			if !strings.Contains(section, "pgcheck "+name+" <database>") {
-				t.Fatalf("%s missing from README language %d", name, i)
+			if !strings.Contains(strings.Join(strings.Fields(section), " "), strings.Join(strings.Fields(cmd.Usage), " ")) {
+				t.Fatalf("%s usage missing from README language %d", cmd.Name, i)
+			}
+		}
+	}
+	fields := []string{
+		"total_exec_ms", "mean_exec_ms", "exec_time_share_pct", "rows_per_call",
+		"temp_read", "temp_written", "temp_io_per_call", "temp_io_ms",
+		"bytes_read", "read_share_pct", "cache_hit_pct", "total_size",
+		"hot_update_pct", "newpage_updates", "fillfactor",
+	}
+	for _, field := range fields {
+		for i, section := range sections {
+			if !strings.Contains(section, "`"+field+"`") {
+				t.Fatalf("%s explanation missing from README language %d", field, i)
 			}
 		}
 	}

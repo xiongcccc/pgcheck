@@ -48,11 +48,40 @@ The project started as a Bash-based one-click inspection script. It is now a com
 - Detects PostgreSQL server version and chooses version-aware SQL for checks that need it.
 - Keeps SQL as plain files under `SQL/` so DBAs can review, reuse, and improve the checks.
 
+## Quick Start
+
+```bash
+make build
+cp pgcheck.example.json pgcheck.json
+chmod 600 pgcheck.json
+```
+
+Edit `connection` in `pgcheck.json` for your instance, then run:
+
+```bash
+bin/pgcheck privilege
+bin/pgcheck quick postgres
+```
+
+Replace `postgres` with your target database. The local config is discovered automatically; use `-c /path/to/pgcheck.json` before the command for another instance. Do not commit credentials.
+
+| Question | Next command |
+| --- | --- |
+| Which sessions are blocking others? | `pgcheck lock_tree postgres` |
+| Which statements accumulated the most execution time? | `pgcheck query_hotspot postgres` |
+| Which statements accumulated the most temporary I/O? | `pgcheck query_temp postgres` |
+| Which tables accumulated reads or updates? | `pgcheck table_hotspot postgres` |
+| Which sessions currently have temporary files? | `pgcheck temp_files` |
+| Which backend types account for I/O? | `pgcheck io_hotspot` (PG16+) |
+| Is ordinary VACUUM work falling behind? | `pgcheck vacuum_needed postgres` |
+
+The two statement commands require `pg_stat_statements`; `quick` and `table_hotspot` do not.
+
 ## Compatibility
 
 The original tool was tested up to PostgreSQL 15. The Go refactor provides version-aware checks for PostgreSQL 11-18. This change's new checks and regression suite passed against real PostgreSQL 11.22, 12.22, 13.23, 14.5, 15.14, 16.14, 17.6, and 18.4 instances. See the [verification record](tests/VERIFICATION.md) for the exact coverage and limitations; this is not a claim that every command or minor release was tested.
 
-PostgreSQL 17+ changed some statistics views, including checkpoint and VACUUM progress views. `pgcheck` now ships version-specific SQL for those checks. Most read-only checks have been smoke-tested against a PostgreSQL 17+ public test instance; `wal_generate` still requires a valid server-side `pg_wal` path and should be verified per deployment.
+PostgreSQL 17+ changed some statistics views, including checkpoint and VACUUM progress views. `pgcheck` ships version-specific SQL for those checks. `io` and `io_hotspot` require PG16+ and support PG18's byte-counter layout and WAL rows. VACUUM progress/queue commands require PG12+; PG11 users can use `vacuum_needed`. `wal_generate` requires a valid server-side `pg_wal` path and should be verified per deployment. Compatibility with an old major version does not imply that PostgreSQL still maintains that version.
 
 ## Requirements
 
@@ -137,14 +166,10 @@ Option notes for users familiar with `psql`:
 ## Build
 
 ```bash
-go build -o bin/pgcheck .
-```
-
-or:
-
-```bash
 make build
 ```
+
+`make build` embeds the version, Git commit, and UTC build time. A direct `go build -o bin/pgcheck .` also works for development, but does not inject the same build metadata. Include the full version output when reporting a problem, together with the PostgreSQL server version and command used; remove credentials and sensitive SQL.
 
 Show help:
 
@@ -193,7 +218,7 @@ pgcheck table_bloat <database>               Estimate table bloat and vacuum blo
 pgcheck temp_files                           Show active sessions using temporary files
 pgcheck vacuum_state <database>              Show running VACUUM progress
 pgcheck vacuum_needed <database>             Show tables likely to need vacuum
-pgcheck vacuum_queue <database>              Show vacuum queue and running vacuum details
+pgcheck vacuum_queue <database>              Show vacuum candidates and running vacuum details (PG12+)
 pgcheck index_create <database>              Show CREATE INDEX progress
 pgcheck wal_archive                          Show WAL archiver statistics
 pgcheck wal_generate <wal_path>              Show WAL generation speed by scanning pg_wal
@@ -210,6 +235,9 @@ pgcheck xmin_blockers                        Show global xmin horizon blockers
 ```bash
 bin/pgcheck dbstatus
 bin/pgcheck quick postgres
+bin/pgcheck query_hotspot postgres
+bin/pgcheck query_temp postgres
+bin/pgcheck table_hotspot postgres
 bin/pgcheck -x lock postgres
 bin/pgcheck -At dbstatus
 bin/pgcheck --config pgcheck.json dbstatus
@@ -242,15 +270,57 @@ pgcheck query_hotspot postgres
 pgcheck query_temp postgres
 pgcheck table_hotspot postgres
 pgcheck query_temp postgres --show-sql
+pgcheck -x query_hotspot postgres
+pgcheck -At query_temp postgres
+pgcheck table_hotspot postgres --explain
 ```
 
 `query_hotspot` ranks cumulative execution time, with calls, mean time, execution-time share (not CPU usage), and rows retrieved or affected per call. `query_temp` ranks cumulative temporary reads plus writes, not current disk usage. Both need a configured `pg_stat_statements` extension in the selected database. Its schema and installed fields are discovered automatically, including legacy extension SQL objects after an engine upgrade. Top-level statements are selected where supported; older definitions may include nested statements when tracking is `all`.
+
+| Output field | Interpretation |
+| --- | --- |
+| `total_exec_ms` / `mean_exec_ms` | Cumulative / mean execution milliseconds; excludes separate planning time in modern extension definitions. Legacy `total_time` / `mean_time` are used when needed. |
+| `exec_time_share_pct` | Execution-time share across all eligible entries in the selected database, before the top-10 limit; not just the ten displayed rows. |
+| `rows_per_call` | Rows retrieved or affected divided by calls; not rows scanned by the execution plan. |
+| `temp_read` / `temp_written` | Cumulative temporary blocks read / written multiplied by the server's `block_size`. |
+| `temp_io_per_call` | `(read bytes + written bytes) / calls`; not peak temporary space per execution. |
+| `temp_io_ms` | Cumulative temporary read plus write milliseconds, only when the fields exist and current `track_io_timing` is on. |
 
 `stats_reset` is the extension-wide reset time and `stats_since` is the per-entry collection start where available. Missing timestamps stay unknown. `dealloc` counts entry eviction events, not failed SQL. Timing is unavailable when unsupported or disabled, and may cover less than the whole statistics window. Restricted roles may see counters without other users' SQL text/query IDs.
 
 `table_hotspot` uses built-in statistics and prints separate read and update top-10 lists. Reads include heap, indexes and TOAST; they may hit the OS cache. Update details include HOT percentage, fillfactor, and cross-page updates on PG16+. Low HOT alone does not justify changing fillfactor. Counters may have been individually reset; these are cumulative rankings, not current rates. These optional checks do not add work or extension dependencies to `quick`.
 
+| Output field | Interpretation |
+| --- | --- |
+| `bytes_read` / `read_share_pct` | Cumulative bytes read across heap, indexes and TOAST / share of eligible table reads before the top-10 limit. |
+| `cache_hit_pct` | Hits divided by hits plus reads for those components; PostgreSQL buffer-cache hits, not OS-cache hits. |
+| `total_size` | Current relation size including indexes and TOAST, not cumulative traffic. |
+| `hot_update_pct` | HOT updates divided by all updates; the update list only includes tables with updates. |
+| `newpage_updates` | Cross-page update count on PG16+; blank on older versions. |
+| `fillfactor` | Current table storage setting, using 100 when no override exists; not measured page fullness. |
+
+These are separate snapshots, not an atomic incident timeline. Table statistics require `track_counts`; empty results may mean no eligible activity or unavailable collection, not proof that the instance has no problem. `pg_stat_io`'s `temp relation` rows describe temporary tables, not sort/hash spill files. Use `query_temp` for cumulative spill traffic and `temp_files` for currently present files.
+
+### Prerequisites And Troubleshooting
+
+Ask the DBA to preserve existing preload entries when adding `pg_stat_statements` to `shared_preload_libraries`, restart the server when required, and install the extension in each database to inspect. On PG14+, query identifier computation must also be enabled, normally with `compute_query_id=auto`. Tracking must not be `none`. `pgcheck` does not perform these administrative changes. See the [official extension guide](https://www.postgresql.org/docs/18/pgstatstatements.html) for setup and the [statistics guide](https://www.postgresql.org/docs/18/monitoring-stats.html) for collection semantics.
+
+| Symptom | What to check |
+| --- | --- |
+| Extension not installed | Have the DBA run `CREATE EXTENSION pg_stat_statements` in the selected database after configuring the module. |
+| Extension not loaded | Check the server's preload configuration and restart status; creating the extension alone is insufficient. |
+| Tracking disabled | Review `pg_stat_statements.track`; the tool does not enable it automatically. |
+| SQL text or query IDs unavailable | Review visibility privileges; `pg_read_all_stats` permits access to other users' query information. |
+| Permission denied | Review the exact extension-schema and view/function privileges in the error; do not blindly grant superuser. |
+| No temporary-I/O rows or blank timing | Check workload history, statistics resets, available fields, and timing configuration; do not equate blank with zero. |
+
+`--explain` describes the logic without connecting. `--show-sql` connects to detect the server version and, for statement checks, the extension schema/fields; it renders the inspection SQL without running it. Export SQL containing internal placeholders this way before standalone execution.
+
+### Maintenance And I/O Corrections
+
 `vacuum_needed` and `vacuum_queue` share effective global/table settings, including insert triggers on PG13+ and the maximum dead-tuple threshold on PG18+. Queue rows are estimated candidates, not the launcher's actual queue. VACUUM progress and queue checks require PG12+; use `vacuum_needed` on PG11. SQL containing internal placeholders should be exported with `--show-sql` before standalone execution.
+
+I/O totals handle unsupported NULL counters without discarding supported ones; raw unavailable counters stay blank. `io_hotspot.total_ops` means reads + writes + extends, not evictions or fsyncs. Checkpoint averages use the statistics reset window and avoid division by zero; these averages cannot identify a current spike. Freeze-triggered maintenance is separate from ordinary VACUUM thresholds: use `wraparound_risk` and `xmin_blockers` as needed.
 
 ## Project Layout
 
@@ -261,7 +331,10 @@ pgcheck query_temp postgres --show-sql
 │   ├── app/                CLI commands, version-aware checks, command execution flow
 │   ├── pgexec/             psql runner and PostgreSQL server version detection
 │   └── queries/            embedded SQL loader and small templating helpers
-├── SQL/                    original SQL check assets
+├── SQL/                    inspection SQL and shared query fragments
+├── scripts/test-postgres.sh disposable PostgreSQL integration runner
+├── tests/                  test instructions and verification record
+├── THIRD_PARTY_NOTICES.md   upstream SQL attribution and license
 ├── pgcheck.example.json    example configuration file
 ├── pgcheck.sh              legacy Bash implementation
 └── README.md
@@ -300,7 +373,7 @@ gofmt -w main.go internal/**/*.go
 Build:
 
 ```bash
-go build -o bin/pgcheck .
+make build
 ```
 
 ## Direction
@@ -313,7 +386,7 @@ The project will stay small. Future work should improve correctness, compatibili
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+pgcheck's own code uses Apache License 2.0; see [LICENSE](LICENSE). Adapted SQL retains its upstream license; include [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) in source and binary distributions.
 
 ## 中文
 
@@ -332,11 +405,40 @@ Apache License 2.0. See [LICENSE](LICENSE).
 - 检测 PostgreSQL 服务端版本，并为需要兼容的检查选择对应 SQL。
 - SQL 仍然以普通文件形式保留在 `SQL/` 目录，方便 DBA 审阅、复用和继续沉淀。
 
+## 快速开始
+
+```bash
+make build
+cp pgcheck.example.json pgcheck.json
+chmod 600 pgcheck.json
+```
+
+将 `pgcheck.json` 中的 `connection` 修改为目标实例，然后执行：
+
+```bash
+bin/pgcheck privilege
+bin/pgcheck quick postgres
+```
+
+将 `postgres` 替换为目标数据库名。工具会自动发现当前目录的配置；连接其他实例时，可在命令前指定 `-c /path/to/pgcheck.json`。不要将凭据提交到仓库。
+
+| 想回答的问题 | 下一步命令 |
+| --- | --- |
+| 谁在阻塞其他会话？ | `pgcheck lock_tree postgres` |
+| 哪些 SQL 累计执行耗时最多？ | `pgcheck query_hotspot postgres` |
+| 哪些 SQL 累计临时读写最多？ | `pgcheck query_temp postgres` |
+| 哪些表累计读取或更新最多？ | `pgcheck table_hotspot postgres` |
+| 哪些会话当前存在临时文件？ | `pgcheck temp_files` |
+| 哪类后台进程贡献了 I/O？ | `pgcheck io_hotspot`（PG16+） |
+| 普通 VACUUM 是否跟不上？ | `pgcheck vacuum_needed postgres` |
+
+两个 SQL 级命令需要 `pg_stat_statements`；`quick` 和 `table_hotspot` 不依赖该扩展。
+
 ## 兼容性
 
 原始工具主要测试到 PostgreSQL 15。Go 重构版本为 PostgreSQL 11-18 提供版本感知检查。本次新增检查及回归测试已在真实 PostgreSQL 11.22、12.22、13.23、14.5、15.14、16.14、17.6、18.4 实例上通过。具体覆盖和边界见[验证记录](tests/VERIFICATION.md)，不代表全部命令和所有小版本均已验证。
 
-PostgreSQL 17+ 对部分统计视图做了调整，例如 checkpoint 和 VACUUM progress 相关视图。`pgcheck` 现在已经为这些检查提供了版本专用 SQL。大部分只读巡检命令已经在 PostgreSQL 17+ 公网测试实例上完成冒烟验证；`wal_generate` 仍然依赖服务端 `pg_wal` 物理路径，需要按具体部署单独验证。
+PostgreSQL 17+ 对部分统计视图做了调整，例如 checkpoint 和 VACUUM progress 相关视图，工具提供对应版本的 SQL。`io`、`io_hotspot` 需要 PG16+，并兼容 PG18 的字节计数字段和 WAL 行。VACUUM 进度及队列命令需要 PG12+，PG11 可使用 `vacuum_needed`。`wal_generate` 依赖服务端 `pg_wal` 物理路径，仍需按部署单独验证。工具兼容旧主版本，不代表 PostgreSQL 官方仍在维护该版本。
 
 ## 环境要求
 
@@ -421,14 +523,10 @@ bin/pgcheck -At dbstatus
 ## 构建
 
 ```bash
-go build -o bin/pgcheck .
-```
-
-也可以使用：
-
-```bash
 make build
 ```
+
+`make build` 会写入版本号、Git 提交及 UTC 构建时间。开发时也可以直接执行 `go build -o bin/pgcheck .`，但不会注入相同的构建信息。反馈问题时，请附上完整版本输出、PostgreSQL 服务端版本和执行命令，并移除凭据及敏感 SQL。
 
 查看帮助：
 
@@ -477,7 +575,7 @@ pgcheck table_bloat <database>               估算表膨胀并查看 VACUUM 阻
 pgcheck temp_files                           查看正在使用临时文件的会话
 pgcheck vacuum_state <database>              查看正在运行的 VACUUM 进度
 pgcheck vacuum_needed <database>             查看可能需要 VACUUM 的表
-pgcheck vacuum_queue <database>              查看 VACUUM 队列和执行状态
+pgcheck vacuum_queue <database>              查看 VACUUM 候选及执行状态（PG12+）
 pgcheck index_create <database>              查看 CREATE INDEX 进度
 pgcheck wal_archive                          查看 WAL 归档状态
 pgcheck wal_generate <wal_path>              基于 pg_wal 目录估算 WAL 生成速度
@@ -494,6 +592,9 @@ pgcheck xmin_blockers                        查看全局 xmin horizon 阻塞来
 ```bash
 bin/pgcheck dbstatus
 bin/pgcheck quick postgres
+bin/pgcheck query_hotspot postgres
+bin/pgcheck query_temp postgres
+bin/pgcheck table_hotspot postgres
 bin/pgcheck -x lock postgres
 bin/pgcheck -At dbstatus
 bin/pgcheck --config pgcheck.json dbstatus
@@ -526,15 +627,57 @@ pgcheck query_hotspot postgres
 pgcheck query_temp postgres
 pgcheck table_hotspot postgres
 pgcheck query_temp postgres --show-sql
+pgcheck -x query_hotspot postgres
+pgcheck -At query_temp postgres
+pgcheck table_hotspot postgres --explain
 ```
 
 `query_hotspot` 按累计执行耗时排序，展示调用次数、平均耗时、执行耗时占比（不是 CPU 使用率）和每次调用读取或影响的行数。`query_temp` 按累计临时读写量排序，读写流量不等于当前文件占用。两者需要目标数据库配置 `pg_stat_statements`，会自动识别扩展 schema 和实际字段，也兼容服务端升级但扩展 SQL 对象未升级的情况。有对应字段时只统计顶层语句；旧扩展在 track=all 时可能包含嵌套语句。
+
+| 输出字段 | 如何理解 |
+| --- | --- |
+| `total_exec_ms` / `mean_exec_ms` | 累计 / 平均执行毫秒数；新扩展定义下不含独立的计划耗时。旧扩展按实际字段使用 `total_time` / `mean_time`。 |
+| `exec_time_share_pct` | 占当前数据库全部符合条件条目的执行耗时比例，在截取前 10 条之前计算，不是只在展示行中计算。 |
+| `rows_per_call` | 返回或影响的行数除以调用次数，不是执行计划扫描的行数。 |
+| `temp_read` / `temp_written` | 累计临时读 / 写块数乘以服务端 `block_size`。 |
+| `temp_io_per_call` | （读取字节 + 写入字节）/ 调用次数，不是单次执行的临时空间峰值。 |
+| `temp_io_ms` | 累计临时读写毫秒数，仅在字段存在且当前 `track_io_timing` 开启时显示。 |
 
 `stats_reset` 是扩展整体重置时间，`stats_since` 是支持该字段时的单条记录统计起点；未知时间保留为空。`dealloc` 是统计条目淘汰事件次数，不是 SQL 失败次数。未提供字段或未启用计时时，不显示临时 I/O 耗时。受限角色可能看到统计值，但无法看到其他用户的 SQL 文本和 queryid。
 
 `table_hotspot` 使用内置统计视图，分别列出读取热点和更新热点。读取包括 heap、索引和 TOAST，仍可能命中 OS 缓存；更新部分包含 HOT 比例、fillfactor，以及 PG16+ 的跨页更新次数。低 HOT 比例不能单独作为调整 fillfactor 的依据。计数可能被单表重置，这些排行是累计值而非当前速率。三个命令按需执行，不会给 `quick` 增加扩展依赖或额外扫描。
 
+| 输出字段 | 如何理解 |
+| --- | --- |
+| `bytes_read` / `read_share_pct` | heap、索引及 TOAST 的累计读取字节 / 在截取前 10 张表之前计算的符合条件表读取占比。 |
+| `cache_hit_pct` | 上述组成部分的命中数 /（命中数 + 读取数），指 PostgreSQL 缓冲区命中，不是 OS 缓存命中。 |
+| `total_size` | 当前包含索引和 TOAST 的表总大小，不是累计读写流量。 |
+| `hot_update_pct` | HOT 更新数 / 总更新数；更新榜只包含发生过更新的表。 |
+| `newpage_updates` | PG16+ 的跨页更新次数，旧版本为空。 |
+| `fillfactor` | 当前表存储参数，未覆盖时为 100，不是实测页面填充率。 |
+
+各列表是独立快照，并非同一个时点的原子事件记录。表统计依赖 `track_counts`；空结果可能表示没有符合条件的活动或未采集统计，不等于实例没有问题。`pg_stat_io` 的 `temp relation` 指临时表，不是排序或哈希溢出文件：累计落盘流量看 `query_temp`，当前存在的文件看 `temp_files`。
+
+### 前置条件与排查
+
+请由 DBA 在保留已有预加载项的前提下，将 `pg_stat_statements` 加入 `shared_preload_libraries`，按需重启服务，并在每个待检查数据库安装扩展。PG14+ 还需要启用 query ID 计算，通常使用 `compute_query_id=auto`；`pg_stat_statements.track` 不能为 `none`。工具不会自动执行这些管理操作。配置细节见[官方扩展说明](https://www.postgresql.org/docs/18/pgstatstatements.html)，统计口径见[官方统计说明](https://www.postgresql.org/docs/18/monitoring-stats.html)。
+
+| 现象 | 检查方向 |
+| --- | --- |
+| 扩展未安装 | 模块配置完成后，由 DBA 在目标数据库执行 `CREATE EXTENSION pg_stat_statements`。 |
+| 扩展未加载 | 检查预加载配置及重启状态，仅创建扩展并不足够。 |
+| 语句采集关闭 | 检查 `pg_stat_statements.track`，工具不会自动开启采集。 |
+| SQL 文本或 queryid 不可见 | 检查统计可见性；`pg_read_all_stats` 允许查看其他用户的查询信息。 |
+| 权限不足 | 按实际报错核对扩展 schema、视图及函数权限，不要直接授予超级用户。 |
+| 没有临时 I/O 行或耗时为空 | 检查历史负载、统计重置、字段支持及计时设置，不要把空值当成零。 |
+
+`--explain` 无需连接即可解释检查逻辑。`--show-sql` 仍需连接，以识别服务端版本及 SQL 级检查的扩展 schema/字段；随后输出巡检 SQL，不执行该巡检查询。包含内部占位符的 SQL，应先用它导出完整查询，再独立执行。
+
+### 维护与 I/O 修正
+
 `vacuum_needed` 和 `vacuum_queue` 共用有效全局/表级配置，包括 PG13+ 的插入触发条件和 PG18+ 的死元组阈值上限。队列是候选估算，不是调度器的内部队列。VACUUM 进度和队列命令需要 PG12+；PG11 可以使用 `vacuum_needed`。包含内部占位符的 SQL，应先使用 `--show-sql` 导出完整查询，再独立执行。
+
+I/O 汇总对不支持的 NULL 计数进行安全处理，避免丢失已有计数，原始不可用字段仍保留为空。`io_hotspot.total_ops` 仅为 reads + writes + extends，不包括 evictions 和 fsyncs。checkpoint 平均值按统计重置窗口计算并避免除零，不能据此判定当前尖刺。freeze 触发的维护不同于普通 VACUUM 阈值，需要时结合 `wraparound_risk`、`xmin_blockers` 判断。
 
 ## 项目结构
 
@@ -545,7 +688,10 @@ pgcheck query_temp postgres --show-sql
 │   ├── app/                CLI 命令、版本兼容逻辑和执行流程
 │   ├── pgexec/             psql 执行器和服务端版本检测
 │   └── queries/            嵌入式 SQL 加载和轻量模板处理
-├── SQL/                    原始 SQL 巡检资产
+├── SQL/                    巡检 SQL 和共享查询片段
+├── scripts/test-postgres.sh 临时 PostgreSQL 集成测试入口
+├── tests/                  测试说明和验证记录
+├── THIRD_PARTY_NOTICES.md   上游 SQL 来源和许可声明
 ├── pgcheck.example.json    配置文件示例
 ├── pgcheck.sh              旧版 Bash 实现
 └── README.md
@@ -557,9 +703,9 @@ pgcheck query_temp postgres --show-sql
 
 部分巡检项来自 [postgres-howto in Chinese](https://postgres-howto.cn/#/README) 中的实践思路，尤其是 [replication lag](https://postgres-howto.cn/#/./docs/17)、[pg_wal growth](https://postgres-howto.cn/#/./docs/31)、[wraparound risk](https://postgres-howto.cn/#/./docs/44)、[xmin horizon](https://postgres-howto.cn/#/./docs/45)、[autovacuum queue and progress](https://postgres-howto.cn/#/./docs/67)、[unused indexes](https://postgres-howto.cn/#/./docs/75)、[int4 PK capacity](https://postgres-howto.cn/#/./docs/80) 和 [ANALYZE/statistics](https://postgres-howto.cn/#/./docs/94)。这些 SQL 都保留为 `SQL/` 目录下的普通文件，方便审阅和继续演进。
 
-## 开发
-
 新增热点 SQL 改编自 [Fabio Telles Rodriguez 的 pg_scripts](https://github.com/fabiotr/pg_scripts)。SQL 文件头记录固定提交、来源和修改；[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 保留完整版权、BSD-3-Clause 许可及两份演讲资料的参考说明。分发二进制时也应附带该声明。
+
+## 开发
 
 运行测试：
 
@@ -584,7 +730,7 @@ bash scripts/test-postgres.sh /path/to/postgresql-16/bin /path/to/postgresql-18/
 构建：
 
 ```bash
-go build -o bin/pgcheck .
+make build
 ```
 
 ## 后续方向
@@ -597,4 +743,4 @@ go build -o bin/pgcheck .
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+pgcheck 自身代码采用 Apache License 2.0，见 [LICENSE](LICENSE)。改编 SQL 保留上游许可，源码及二进制分发均需附带 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

@@ -84,8 +84,8 @@ func TestSQLAssetsUseSaferRelations(t *testing.T) {
 		t.Fatal(err)
 	}
 	vacuumNeedSQL := string(vacuumNeed)
-	if !strings.Contains(vacuumNeedSQL, "pg_stat_user_tables.relid = pg_class.oid") {
-		t.Fatalf("vacuum_needed should join pg_class by oid/relid")
+	if !strings.Contains(vacuumNeedSQL, "v.oid = s.relid") {
+		t.Fatalf("vacuum_needed should join effective settings by oid/relid")
 	}
 
 	unusedIndexes, err := os.ReadFile("../../SQL/find_unused_indexes.sql")

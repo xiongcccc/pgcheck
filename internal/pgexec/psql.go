@@ -49,24 +49,6 @@ func NewRunner(cfg Config) *Runner {
 	}
 }
 
-func (r *Runner) Check(ctx context.Context) error {
-	if r.Backend == "native" {
-		db, err := sql.Open("postgres", r.connString(""))
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		return db.PingContext(ctx)
-	}
-	cmd := exec.CommandContext(ctx, r.Config.PSQL.Path, "--version")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cannot execute %q: %w %s", r.Config.PSQL.Path, err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
 func (r *Runner) ServerVersion(ctx context.Context, database string) (ServerVersion, error) {
 	out, err := r.QueryScalar(ctx, Options{Database: database, TuplesOnly: true, NoAlign: true}, "SHOW server_version_num;")
 	if err != nil {
@@ -98,7 +80,7 @@ func (r *Runner) QueryScalar(ctx context.Context, opts Options, query string) (s
 		return value.String, nil
 	}
 	var stdout, stderr bytes.Buffer
-	cmd := r.command(ctx, opts, query)
+	cmd := r.command(ctx, opts, query, true)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -121,7 +103,7 @@ func (r *Runner) Exec(ctx context.Context, opts Options, query string) error {
 		defer rows.Close()
 		return printRows(r.Out, rows, r.effectiveOptions(opts))
 	}
-	cmd := r.command(ctx, opts, query)
+	cmd := r.command(ctx, opts, query, false)
 	var stderr bytes.Buffer
 	cmd.Stdout = r.Out
 	cmd.Stderr = &stderr
@@ -207,7 +189,19 @@ func printRows(out io.Writer, rows *sql.Rows, opts Options) error {
 		return err
 	}
 	if opts.Expanded {
-		return printExpanded(out, cols, data)
+		return printExpanded(out, cols, data, opts)
+	}
+	if opts.NoAlign {
+		if !opts.TuplesOnly {
+			fmt.Fprintln(out, strings.Join(cols, "|"))
+		}
+		if err := printTuplesOnly(out, data, true); err != nil {
+			return err
+		}
+		if !opts.TuplesOnly {
+			printRowCount(out, len(data))
+		}
+		return nil
 	}
 	if opts.TuplesOnly {
 		return printTuplesOnly(out, data, opts.NoAlign)
@@ -239,18 +233,53 @@ func printTable(out io.Writer, cols []string, widths []int, data [][]string) err
 		}
 		fmt.Fprintln(out)
 	}
-	fmt.Fprintf(out, "(%d rows)\n", len(data))
+	printRowCount(out, len(data))
 	return nil
 }
 
-func printExpanded(out io.Writer, cols []string, data [][]string) error {
-	for idx, row := range data {
-		fmt.Fprintf(out, "-[ RECORD %d ]-------------------------\n", idx+1)
-		for i, col := range cols {
-			fmt.Fprintf(out, "%s | %s\n", col, row[i])
+func printRowCount(out io.Writer, count int) {
+	if count == 1 {
+		fmt.Fprintln(out, "(1 row)")
+		return
+	}
+	fmt.Fprintf(out, "(%d rows)\n", count)
+}
+
+func printExpanded(out io.Writer, cols []string, data [][]string, opts Options) error {
+	nameWidth, valueWidth := 0, 0
+	for _, col := range cols {
+		if len(col) > nameWidth {
+			nameWidth = len(col)
 		}
 	}
-	fmt.Fprintf(out, "(%d rows)\n", len(data))
+	for _, row := range data {
+		for _, value := range row {
+			if len(value) > valueWidth {
+				valueWidth = len(value)
+			}
+		}
+	}
+	for idx, row := range data {
+		if !opts.TuplesOnly {
+			fmt.Fprintf(out, "-[ RECORD %d ]-------------------------\n", idx+1)
+		} else if idx > 0 {
+			if opts.NoAlign {
+				fmt.Fprintln(out)
+			} else {
+				fmt.Fprintf(out, "%s+%s\n", strings.Repeat("-", nameWidth+1), strings.Repeat("-", valueWidth+1))
+			}
+		}
+		for i, col := range cols {
+			if opts.NoAlign {
+				fmt.Fprintf(out, "%s|%s\n", col, row[i])
+			} else {
+				fmt.Fprintf(out, "%-*s | %s\n", nameWidth, col, row[i])
+			}
+		}
+	}
+	if opts.TuplesOnly && !opts.NoAlign {
+		fmt.Fprintln(out)
+	}
 	return nil
 }
 
@@ -265,7 +294,7 @@ func printTuplesOnly(out io.Writer, data [][]string, noAlign bool) error {
 	return nil
 }
 
-func (r *Runner) command(ctx context.Context, opts Options, query string) *exec.Cmd {
+func (r *Runner) command(ctx context.Context, opts Options, query string, scalar bool) *exec.Cmd {
 	opts = r.effectiveOptions(opts)
 	args := []string{"-v", "ON_ERROR_STOP=1"}
 	if r.Config.PSQL.Quiet {
@@ -287,6 +316,10 @@ func (r *Runner) command(ctx context.Context, opts Options, query string) *exec.
 		args = append(args, "-d", opts.Database)
 	}
 	args = append(args, r.Config.PSQL.ExtraArgs...)
+	// Metadata parsing must not inherit CSV, expanded output or startup formatting.
+	if scalar {
+		args = append(args, "-qAtX", "-P", "format=unaligned", "-P", "expanded=off", "-P", "tuples_only=on")
+	}
 	args = append(args, "-c", query)
 	cmd := exec.CommandContext(ctx, r.Config.PSQL.Path, args...)
 	cmd.Env = r.psqlEnv()

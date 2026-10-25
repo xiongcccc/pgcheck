@@ -24,12 +24,27 @@ var indexBloatNotes = []string{
 
 var ioNotes = []string{
 	"pg_stat_io is available in PostgreSQL 16+.",
-	"Use this to compare relation, temp, and WAL I/O across backend, bgwriter, checkpointer, and autovacuum.",
+	"Counters are cumulative; compare backend_type and context before interpreting cache or I/O pressure. WAL rows require PostgreSQL 18+.",
+	"temp relation means temporary tables, not sort/hash spill files; use query_temp or temp_files for spills.",
 }
 
 var ioHotspotNotes = []string{
 	"Rows are ordered by accumulated I/O time and operation count.",
-	"High checkpointer fsync or write time can indicate checkpoint spikes; high temp I/O can indicate work_mem pressure.",
+	"total_ops is reads + writes + extends; evictions and fsync calls are reported separately. Unsupported raw counters remain NULL.",
+	"Cumulative time cannot identify a current spike. Timing needs track_io_timing (track_wal_io_timing for WAL); zero does not prove there was no I/O wait.",
+	"temp relation means temporary tables, not sort/hash spill files; use query_temp or temp_files for spills.",
+}
+
+var statementNotes = []string{
+	"Counters are cumulative, not current rates. stats_reset is the extension-wide reset; stats_since is per entry when supported. Blank timestamps mean unknown.",
+	"Only this database is included; top-level entries are selected when supported. Execution-time share is not CPU usage. rows_per_call includes rows affected by DML.",
+	"Unavailable SQL text/query IDs may reflect restricted visibility or discarded text. pg_read_all_stats permits visibility of other users' queries.",
+	"Temporary I/O is read/write traffic, not current file size. Timing may cover only the part of the window during which collection was enabled.",
+}
+
+var tableHotspotNotes = []string{
+	"Counters are cumulative and may have been reset per table. Reads can hit the OS cache and are not device IOPS; Top-N limits output, not all catalog work.",
+	"HOT percentage is undefined without updates. Cross-page counts require PostgreSQL 16+. Check indexed columns and page space before adjusting fillfactor.",
 }
 
 var indexCreateNotes = []string{
@@ -89,7 +104,7 @@ var replicationSlotsNotes = []string{
 
 var tempFilesNotes = []string{
 	"Current temporary files usually indicate large sorts, hashes, materialized CTEs, or insufficient work_mem for a query.",
-	"This check requires enough privilege to execute pg_ls_dir and pg_stat_file, or a monitoring role such as pg_monitor.",
+	"This check requires EXECUTE on pg_ls_dir/pg_stat_file and access to data_directory; pg_monitor alone may not be sufficient.",
 }
 
 var walHealthNotes = []string{
@@ -113,7 +128,8 @@ var vacuumStateNotes = []string{
 }
 
 var vacuumQueueNotes = []string{
-	"Rows marked as in queue have crossed effective autovacuum thresholds but are not currently being vacuumed.",
+	"Queue rows are estimated candidates, not the launcher's actual queue. Thresholds include table overrides, insert triggers (PG13+) and the cap (PG18+). Disabled tables are labelled separately.",
+	"Freeze-triggered maintenance is separate; use wraparound_risk. Counters are estimates and worker availability also affects scheduling.",
 	"Use this with xmin_blockers and long_transaction when dead tuples keep accumulating.",
 }
 

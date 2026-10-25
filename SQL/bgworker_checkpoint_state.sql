@@ -3,9 +3,10 @@ SELECT
     pg_size_pretty(block_size * buffers_clean ) AS bgworker_total_writen,
     pg_size_pretty(block_size * buffers_checkpoint ) AS chkpointer_total_writen,
     pg_size_pretty(block_size * buffers_backend ) AS backend_total_writen,
-    pg_size_pretty(block_size * buffers_checkpoint / (checkpoints_timed + checkpoints_req)) AS checkpoint_write_avg,
-    EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time())) / (checkpoints_timed + checkpoints_req) / 60 AS minutes_between_checkpoints,
-    buffers_backend_fsync
+    pg_size_pretty(block_size * buffers_checkpoint / NULLIF(checkpoints_timed + checkpoints_req, 0)) AS checkpoint_write_avg,
+    EXTRACT(EPOCH FROM (now() - stats_reset)) / NULLIF(checkpoints_timed + checkpoints_req, 0) / 60 AS minutes_between_checkpoints,
+    buffers_backend_fsync,
+    stats_reset
 FROM
     pg_stat_bgwriter,
     (

@@ -1,20 +1,22 @@
+{{vacuum_settings}}
 SELECT
-    pg_stat_user_tables.schemaname,
-    pg_stat_user_tables.relname,
-    pg_stat_user_tables.n_dead_tup,
-    50 + 0.1 * greatest(pg_class.reltuples, 0) as vacuum_threshold,
-    pg_stat_user_tables.n_live_tup,
-    pg_stat_user_tables.n_tup_del,
-    pg_stat_user_tables.n_tup_upd,
-    pg_stat_user_tables.autovacuum_count,
-    pg_stat_user_tables.last_vacuum,
-    pg_stat_user_tables.last_autovacuum,
-    now() as now,
-    pg_class.reltuples,
-    pg_stat_user_tables.n_dead_tup > (50 + 0.1 * greatest(pg_class.reltuples, 0)) as is_vacuum
-FROM
-    pg_stat_user_tables
-    JOIN pg_class ON pg_stat_user_tables.relid = pg_class.oid
-ORDER BY
-    pg_stat_user_tables.n_dead_tup > (50 + 0.1 * greatest(pg_class.reltuples, 0)) DESC,
-    pg_stat_user_tables.n_dead_tup DESC;
+    s.schemaname,
+    s.relname,
+    s.n_dead_tup,
+    v.vacuum_threshold,
+    (to_jsonb(s) ->> 'n_ins_since_vacuum')::bigint AS inserts_since_vacuum,
+    v.insert_threshold,
+    v.autovacuum_enabled,
+    s.n_live_tup,
+    s.n_tup_del,
+    s.n_tup_upd,
+    s.autovacuum_count,
+    s.last_vacuum,
+    s.last_autovacuum,
+    now() AS now,
+    v.reltuples,
+    coalesce(s.n_dead_tup > v.vacuum_threshold, false)
+        OR coalesce((to_jsonb(s) ->> 'n_ins_since_vacuum')::bigint > v.insert_threshold, false) AS is_vacuum
+FROM pg_stat_user_tables s
+JOIN vacuum_settings v ON v.oid = s.relid
+ORDER BY is_vacuum DESC, s.n_dead_tup DESC, s.relid;

@@ -44,7 +44,7 @@ SELECT
     extends,
     pg_size_pretty(extend_bytes) AS extend_bytes,
     extend_time,
-    pg_size_pretty(read_bytes + write_bytes + extend_bytes) AS io_bytes,
+    pg_size_pretty(coalesce(read_bytes, 0) + coalesce(write_bytes, 0) + coalesce(extend_bytes, 0)) AS io_bytes,
     hits,
     evictions,
     reuses,

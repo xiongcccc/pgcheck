@@ -25,12 +25,12 @@ WITH raw AS (
         reuses,
         fsyncs,
         fsync_time,
-        (reads + writes + extends + evictions + fsyncs) AS total_ops,
-        (read_time + write_time + writeback_time + extend_time + fsync_time) AS total_time,
+        (coalesce(reads, 0)::numeric + coalesce(writes, 0)::numeric + coalesce(extends, 0)::numeric) AS total_ops,
+        (coalesce(read_time, 0) + coalesce(write_time, 0) + coalesce(writeback_time, 0) + coalesce(extend_time, 0) + coalesce(fsync_time, 0)) AS total_time,
         (
-            coalesce((stat ->> 'read_bytes')::numeric, reads::numeric * coalesce((stat ->> 'op_bytes')::numeric, current_setting('block_size')::numeric)) +
-            coalesce((stat ->> 'write_bytes')::numeric, writes::numeric * coalesce((stat ->> 'op_bytes')::numeric, current_setting('block_size')::numeric)) +
-            coalesce((stat ->> 'extend_bytes')::numeric, extends::numeric * coalesce((stat ->> 'op_bytes')::numeric, current_setting('block_size')::numeric))
+            coalesce((stat ->> 'read_bytes')::numeric, reads::numeric * coalesce((stat ->> 'op_bytes')::numeric, current_setting('block_size')::numeric), 0) +
+            coalesce((stat ->> 'write_bytes')::numeric, writes::numeric * coalesce((stat ->> 'op_bytes')::numeric, current_setting('block_size')::numeric), 0) +
+            coalesce((stat ->> 'extend_bytes')::numeric, extends::numeric * coalesce((stat ->> 'op_bytes')::numeric, current_setting('block_size')::numeric), 0)
         ) AS total_bytes
     FROM
         raw
@@ -54,7 +54,9 @@ SELECT
     evictions,
     reuses,
     fsyncs,
-    fsync_time
+    fsync_time,
+    current_setting('track_io_timing') AS track_io_timing,
+    current_setting('track_wal_io_timing', true) AS track_wal_io_timing
 FROM
     io
 ORDER BY

@@ -83,7 +83,7 @@ func (a *App) Run(args []string) error {
 	inv := invocation{Command: cmd.Name}
 	rest = rest[1:]
 	if cmd.Database {
-		if len(rest) == 0 {
+		if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
 			return fmt.Errorf("%s requires database name\nusage: %s", cmd.Name, cmd.Usage)
 		}
 		inv.DB = rest[0]
@@ -107,14 +107,13 @@ func (a *App) Run(args []string) error {
 		}
 	}
 	inv.Args = rest
+	if len(rest) > len(cmd.Extra) {
+		return fmt.Errorf("unexpected argument %q\nusage: %s", rest[len(cmd.Extra)], cmd.Usage)
+	}
 
 	if inv.Explain && !inv.ShowSQL {
 		fmt.Println(commandExplain(cmd))
 		return nil
-	}
-
-	if err := a.runner.Check(ctx); err != nil {
-		return err
 	}
 
 	versionDB := inv.DB
@@ -200,6 +199,9 @@ func commands() []command {
 			Run:     runCheckpoint,
 		},
 		sqlCommand("connections", "pgcheck connections <database>", "Show connection summary and active queries", true, nil, 0, false, []queryStep{{File: "current_connection.sql"}, {File: "current_query.sql"}}),
+		withExplain(command{Name: "query_hotspot", Usage: "pgcheck query_hotspot <database>", Summary: "Show top 10 statements by cumulative execution time", Database: true, Run: runQueryHotspot}, "Uses pg_stat_statements in its installed schema to rank statements in this database by cumulative execution time. Shows calls, execution-time share (not CPU usage), mean time, rows per call and SQL excerpts. Uses top-level statements when that field is available. Requires a configured pg_stat_statements extension; no settings or statistics are changed."),
+		withExplain(command{Name: "query_temp", Usage: "pgcheck query_temp <database>", Summary: "Show top 10 statements by cumulative temporary I/O", Database: true, Run: runQueryTemp}, "Uses pg_stat_statements to rank statements by cumulative temporary blocks read plus written, multiplied by block_size. Read/write volume is not current disk usage. Timing is shown only when supported and track_io_timing is enabled. Complements temp_files, which shows files currently present."),
+		withExplain(sqlCommand("table_hotspot", "pgcheck table_hotspot <database>", "Show top 10 tables by reads and updates", true, nil, 0, false, []queryStep{{File: "table_hotspot.sql", Header: "cumulative table reads (heap, indexes and TOAST):"}, {File: "table_updates.sql", Header: "cumulative table updates:", Notes: tableHotspotNotes}}), "Shows two independent top-10 lists: buffer reads across heap/index/TOAST, and table updates with HOT percentage and fillfactor. Counters are cumulative, not current rates or device IOPS. Cross-page updates are available in PostgreSQL 16+. Low HOT alone does not imply fillfactor should be reduced."),
 		{
 			Name: "dbstatus", Usage: "pgcheck dbstatus", Summary: "Show database-level statistics", Run: runDBStatus,
 		},
@@ -234,14 +236,14 @@ func commands() []command {
 		{Name: "replication", Usage: "pgcheck replication", Summary: "Show physical streaming replication status", Run: runReplication},
 		{Name: "replication_slots", Usage: "pgcheck replication_slots", Summary: "Show replication slot xmin and retained WAL", Run: runReplicationSlots},
 		withExplain(sqlCommand("temp_files", "pgcheck temp_files", "Show active sessions using temporary files", false, nil, 0, false, []queryStep{{File: "temp_files.sql", Notes: tempFilesNotes}}), "This check scans pgsql_tmp directories with pg_ls_dir and pg_stat_file, groups temporary files by backend pid, and joins pg_stat_activity to show which active sessions are consuming temporary file space."),
-		sqlCommand("vacuum_needed", "pgcheck vacuum_needed <database>", "Show tables likely to need vacuum", true, nil, 0, false, []queryStep{{File: "vacuum_need.sql"}}),
-		sqlCommand("vacuum_queue", "pgcheck vacuum_queue <database>", "Show vacuum queue and running vacuum details", true, nil, 0, false, []queryStep{{File: "vacuum_queue.sql", Notes: vacuumQueueNotes}}),
+		withExplain(sqlCommand("vacuum_needed", "pgcheck vacuum_needed <database>", "Show tables likely to need vacuum", true, nil, 0, false, []queryStep{{File: "vacuum_need.sql", Notes: vacuumQueueNotes}}), "Compares estimated dead and inserted tuples against effective global/table autovacuum thresholds. Includes insert triggers in PG13+ and the maximum dead-tuple threshold in PG18+. Disabled autovacuum is shown explicitly; freeze eligibility is covered by wraparound_risk."),
+		sqlCommand("vacuum_queue", "pgcheck vacuum_queue <database>", "Show vacuum candidates and running vacuum details (PG12+)", true, nil, 12, false, []queryStep{{File: "vacuum_queue.sql", Notes: vacuumQueueNotes}}),
 		{
 			Name:       "vacuum_state",
 			Usage:      "pgcheck vacuum_state <database>",
 			Summary:    "Show running VACUUM progress",
 			Database:   true,
-			MinVersion: 11,
+			MinVersion: 12,
 			Run:        runVacuumState,
 		},
 		sqlCommand("wait_event", "pgcheck wait_event <database>", "Show wait events and wait event types", true, nil, 0, false, []queryStep{{File: "wait_event.sql"}}),
@@ -293,6 +295,10 @@ func splitTailFlags(args []string) ([]string, []string) {
 
 func decoratePermissionError(commandName string, err error) error {
 	msg := err.Error()
+	lower := strings.ToLower(msg)
+	if !strings.Contains(lower, "permission denied") && !strings.Contains(lower, "must be superuser") {
+		return err
+	}
 	checks := []struct {
 		Pattern        string
 		Requirement    string
@@ -302,13 +308,12 @@ func decoratePermissionError(commandName string, err error) error {
 		{"pg_replication_slots", "pg_replication_slots requires pg_monitor or superuser for full monitoring visibility.", "GRANT pg_monitor TO <user>;"},
 		{"pg_locks", "pg_locks visibility is best with pg_monitor or superuser.", "GRANT pg_monitor TO <user>;"},
 		{"pg_stat_activity", "pg_stat_activity full query visibility requires pg_read_all_stats, pg_monitor, or superuser.", "GRANT pg_read_all_stats TO <user>;"},
-		{"pg_ls_dir", "pg_ls_dir requires execute privilege, pg_monitor, or superuser.", "GRANT EXECUTE ON FUNCTION pg_ls_dir(text, boolean, boolean) TO <user>;"},
+		{"pg_ls_dir", "pg_ls_dir requires EXECUTE on the called signature; path access may also require pg_read_server_files or superuser.", "GRANT EXECUTE ON FUNCTION pg_ls_dir(text, boolean, boolean) TO <user>;"},
 		{"pg_ls_waldir", "pg_ls_waldir requires execute privilege, pg_monitor, or superuser.", "GRANT EXECUTE ON FUNCTION pg_ls_waldir() TO <user>;"},
-		{"pg_stat_file", "pg_stat_file requires execute privilege, pg_monitor, or superuser.", "GRANT EXECUTE ON FUNCTION pg_stat_file(text, boolean) TO <user>;"},
+		{"pg_stat_file", "pg_stat_file requires EXECUTE on the called signature; path access may also require pg_read_server_files or superuser.", "GRANT EXECUTE ON FUNCTION pg_stat_file(text, boolean) TO <user>;"},
 		{"pg_control", "pg_control_* functions require pg_monitor or superuser.", "GRANT pg_monitor TO <user>;"},
-		{"pg_stat_statements", "pg_stat_statements requires the extension and sufficient stats visibility.", "CREATE EXTENSION pg_stat_statements; GRANT pg_read_all_stats TO <user>;"},
+		{"pg_stat_statements", "access requires privileges on the extension schema and statistics objects.", "Ask the DBA to grant USAGE on the extension schema and access to its statistics views/functions. For other users' SQL text: GRANT pg_read_all_stats TO <user>;"},
 	}
-	lower := strings.ToLower(msg)
 	for _, check := range checks {
 		if strings.Contains(lower, strings.ToLower(check.Pattern)) {
 			return fmt.Errorf("permission denied while running %s: %s\nRecommendation:\n  %s\nOriginal error: %w", commandName, check.Requirement, check.Recommendation, err)

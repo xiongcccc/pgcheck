@@ -28,10 +28,11 @@ type queryStep struct {
 }
 
 type quickStep struct {
-	title    string
-	step     queryStep
-	query    func() (string, error)
-	expanded bool
+	title      string
+	step       queryStep
+	query      func() (string, error)
+	expanded   bool
+	minVersion int
 }
 
 func sqlCommand(name, usage, summary string, database bool, extra []argSpec, minVersion int, expanded bool, steps []queryStep) command {
@@ -110,7 +111,18 @@ func (a *App) stepSQL(step queryStep) (string, error) {
 	if step.OptionalInline != "" {
 		return strings.TrimSpace(step.OptionalInline), nil
 	}
-	return a.q.Read(step.File)
+	query, err := a.q.Read(step.File)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(query, "{{vacuum_settings}}") {
+		settings, err := a.q.Read("vacuum_settings.sql")
+		if err != nil {
+			return "", err
+		}
+		query = strings.ReplaceAll(query, "{{vacuum_settings}}", settings)
+	}
+	return query, nil
 }
 
 func (a *App) hasResultRows(ctx context.Context, opts pgexec.Options, query string) (bool, error) {
@@ -234,8 +246,9 @@ func runQuick(ctx context.Context, a *App, inv invocation) error {
 			step:  queryStep{File: "wal_health.sql"},
 		},
 		{
-			title: "vacuum queue",
-			step:  queryStep{File: "vacuum_queue.sql"},
+			title:      "vacuum queue",
+			step:       queryStep{File: "vacuum_queue.sql"},
+			minVersion: 12,
 		},
 		{
 			title: "active temporary files",
@@ -246,6 +259,10 @@ func runQuick(ctx context.Context, a *App, inv invocation) error {
 	hadWarning := false
 	for _, item := range steps {
 		fmt.Printf("\n== %s ==\n", item.title)
+		if inv.Version.Major < item.minVersion {
+			fmt.Printf("requires PostgreSQL %d+; connected server is PostgreSQL %d\n", item.minVersion, inv.Version.Major)
+			continue
+		}
 		query, err := item.querySQL(a)
 		if err != nil {
 			hadWarning = true

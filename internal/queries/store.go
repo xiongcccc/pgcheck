@@ -27,6 +27,10 @@ func QuoteLiteral(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
+func QuoteIdentifier(v string) string {
+	return `"` + strings.ReplaceAll(v, `"`, `""`) + `"`
+}
+
 func ReplaceLiteral(query, oldLiteral, value string) string {
 	return strings.ReplaceAll(query, oldLiteral, QuoteLiteral(value))
 }

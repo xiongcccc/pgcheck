@@ -1,0 +1,67 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test -race ./...
+      - run: go vet ./...
+  postgres:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['11', '12', '13', '14', '15', '16', '17', '18']
+    env:
+      PGCHECK_TEST_DSN: host=127.0.0.1 port=5432 user=pgcheck_test dbname=postgres sslmode=disable
+      PGCHECK_TEST_HOST: 127.0.0.1
+      PGCHECK_TEST_PSQL: /usr/bin/psql
+      PGCHECK_TEST_BIN: /tmp/pgcheck-integration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Start isolated PostgreSQL
+        run: |
+          docker run -d --name pgcheck-test -p 127.0.0.1:5432:5432 \
+            -e POSTGRES_USER=pgcheck_test -e POSTGRES_DB=postgres \
+            -e POSTGRES_HOST_AUTH_METHOD=trust postgres:${{ matrix.postgres }} \
+            -c cluster_name=pgcheck-integration -c shared_preload_libraries=pg_stat_statements \
+            -c track_io_timing=on -c max_parallel_workers_per_gather=0
+          for attempt in $(seq 1 30); do
+            if psql "$PGCHECK_TEST_DSN" -c 'SELECT 1'; then exit 0; fi
+            sleep 1
+          done
+          docker logs pgcheck-test
+          exit 1
+      - run: go build -o "$PGCHECK_TEST_BIN" .
+      - run: go test -race -count=1 -v ./...
+      - name: Verify non-preloaded diagnostics
+        run: |
+          docker rm -f pgcheck-test
+          docker run -d --name pgcheck-test -p 127.0.0.1:5432:5432 \
+            -e POSTGRES_USER=pgcheck_test -e POSTGRES_DB=postgres \
+            -e POSTGRES_HOST_AUTH_METHOD=trust postgres:${{ matrix.postgres }} \
+            -c cluster_name=pgcheck-integration
+          for attempt in $(seq 1 30); do
+            if psql "$PGCHECK_TEST_DSN" -c 'SELECT 1'; then
+              PGCHECK_TEST_MODE=unloaded go test -count=1 -v ./internal/app -run '^TestIntegrationUnloadedExtension$'
+              exit $?
+            fi
+            sleep 1
+          done
+          exit 1
+      - name: Server logs
+        if: failure()
+        run: docker logs pgcheck-test
+      - name: Clean up
+        if: always()
+        run: docker rm -f pgcheck-test
